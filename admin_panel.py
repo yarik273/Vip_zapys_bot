@@ -2,198 +2,153 @@ import os
 import telebot
 import threading
 import json
-import shutil
-from datetime import datetime, timedelta
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# ================= НАЛАШТУВАННЯ ЗІ СКРИНШОТА =================
+# ================= НАЛАШТУВАННЯ =================
 BOT_TOKEN = os.getenv("PRIVATE_BOT_TOKEN")     # Токен нового бота від BotFather
-REPO_NAME = "yarik273/cs-vip-control"          # Ваш репозиторій зі скриншота
-FILE_PATH = "vip_users.json"                   # Ваш JSON-файл зі скриншота
 ALLOWED_ADMIN_ID = 5596041220                  # Ваш особистий Telegram ID
-# =============================================================
-
-# Наш надійний зашитий SSH-ключ, який більше не зламається на Render
-SSH_PRIVATE_KEY = """-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACDpuoPwNoeuNbwuz9qtOTLJBsyG8lPjO+6iHgv9s+usTQAAsKDXF5Cw1xeQ
-sAAAAAtzc2gtZWQyNTUxOQAAACDpuoPwNoeuNbwuz9qtOTLJBsyG8lPjO+6iHgv9s+usTQ
-AAAECbB0WkHwS258b3/V1zBfsh8uH/G4uMIn232YofI/VbX+m6g/A2h641vC7P2q0pMskG
-zIbyU+M77qIeC/2z66xNAAAAC3ZpcC1ib3Qta2V5AQIDBAU=
------END OPENSSH PRIVATE KEY-----"""
+FILE_PATH = "vip_users.json"                   # Локальний файл бази даних
+# ================================================
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Функція для чистки застарілих гравців за форматом YYYY-MM-DD
-def clean_expired_players(players_list):
-    today_str = datetime.now().strftime("%Y-%m-%d")
+# Функція для чистки застарілих гравців та підрахунку залишку днів
+def process_and_clean_database():
+    if not os.path.exists(FILE_PATH):
+        return [], 0
+        
+    try:
+        with open(FILE_PATH, "r", encoding="utf-8") as f:
+            players_list = json.load(f)
+    except Exception:
+        return [], 0
+
+    if not isinstance(players_list, list):
+        players_list = []
+
+    today = datetime.now().date()
     valid_players = []
     expired_count = 0
 
     for player in players_list:
         try:
-            if player.get("expire_date", "") >= today_str:
+            expire_str = player.get("expire_date", "")
+            expire_date = datetime.strptime(expire_str, "%Y-%m-%d").date()
+            
+            # Якщо термін не закінчився — залишаємо гравця
+            if expire_date >= today:
+                # Рахуємо скільки днів залишилося
+                days_left = (expire_date - today).days
+                player["days_left"] = days_left
                 valid_players.append(player)
             else:
                 expired_count += 1
         except Exception:
+            # На випадок помилки дати залишаємо гравця, щоб не втратити дані
+            player["days_left"] = "?"
             valid_players.append(player)
+
+    # Перезаписуємо чистий файл назад у пам'ять бота
+    with open(FILE_PATH, "w", encoding="utf-8") as f:
+        json.dump(valid_players, f, indent=2, ensure_ascii=False)
 
     return valid_players, expired_count
 
-# Функція для зчитування, чистки та додавання нового гравця через SSH Ключ
-def update_json_on_github(new_player_obj):
-    home_dir = os.path.expanduser("~")
-    ssh_dir = os.path.join(home_dir, ".ssh")
-    os.makedirs(ssh_dir, exist_ok=True)
-    
-    ssh_key_path = os.path.join(ssh_dir, "id_ed25519")
-    repo_dir = os.path.join(home_dir, "cs-vip-control-repo")
-    
-    try:
-        # Записуємо ключ безпосередньо зі змінної в коді
-        with open(ssh_key_path, "w", encoding="utf-8") as f:
-            f.write(SSH_PRIVATE_KEY.strip() + "\n")
-        os.chmod(ssh_key_path, 0o600)
-        
-        # Налаштовуємо систему безпеки Git
-        os.environ["GIT_SSH_COMMAND"] = f"ssh -i {ssh_key_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no"
-        
-        if os.path.exists(repo_dir):
-            shutil.rmtree(repo_dir)
-            
-        import subprocess
-        clone_res = subprocess.run(
-            f"git clone git@github.com:{REPO_NAME}.git {repo_dir}", 
-            shell=True, capture_output=True, text=True
-        )
-        if clone_res.returncode != 0:
-            return False, f"Помилка клонування репозиторію:\n{clone_res.stderr}"
-        
-        full_file_path = os.path.join(repo_dir, FILE_PATH)
-        
-        try:
-            with open(full_file_path, "r", encoding="utf-8") as f:
-                players_list = json.load(f)
-        except Exception:
-            players_list = []
-            
-        if not isinstance(players_list, list):
-            players_list = []
-
-        # КРОК 1: Очищаємо список від тих, у кого закінчився термін
-        cleaned_list, expired_count = clean_expired_players(players_list)
-
-        # КРОК 2: Додаємо нового гравця в масив
-        cleaned_list.append(new_player_obj)
-
-        # КРОК 3: Перетворюємо у красивий JSON-текст із відступами
-        with open(full_file_path, "w", encoding="utf-8") as f:
-            json.dump(cleaned_list, f, indent=2, ensure_ascii=False)
-
-        # КРОК 4: Записуємо оновлену базу на GitHub
-        commit_cmd = (
-            f"cd {repo_dir} && "
-            f"git config user.name 'Admin Bot' && "
-            f"git config user.email 'bot@render.com' && "
-            f"git add {FILE_PATH} && "
-            f"git commit -m 'Додано {new_player_obj['nickname']}' && "
-            f"git push origin main"
-        )
-        push_res = subprocess.run(commit_cmd, shell=True, capture_output=True, text=True)
-        
-        if push_res.returncode != 0:
-            return False, f"Помилка відправки змін (git push):\n{push_res.stderr}"
-        
-        if os.path.exists(ssh_key_path):
-            os.remove(ssh_key_path)
-        if os.path.exists(repo_dir):
-            shutil.rmtree(repo_dir)
-            
-        return True, expired_count
-    except Exception as e:
-        return False, f"Системна помилка в коді бота:\n{str(e)}"
-
-# Обробник команди /start
+# Обробник команди /start (Тільки для вас)
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     if message.from_user.id != ALLOWED_ADMIN_ID:
+        # Для звичайних користувачів показуємо просту інструкцію
+        bot.send_message(message.chat.id, "👋 Вітання! Напишіть команду `/info`, щоб переглянути список активних привілегій на сервері.", parse_mode="Markdown")
         return
-        
-    instructions = (
+    
+    welcome_text = (
         "👋 **Привіт, Ярославе!**\n\n"
-        "Я твій особистий адмін-бот для редагування файлу `vip_users.json`.\n\n"
-        "📝 **Надсилай мені дані нового гравця через кому у такому форматі:**\n"
-        "`Нік, SteamID, Привілегія, Кількість днів`\n\n"
-        "📌 **Приклад повідомлення:**\n"
-        "`SilverevliS, STEAM_2:1:413704831, SPONSOR, 30`\n\n"
-        "Я сам вирахую дату, додам його у твій поточний файл, а також автоматично **видалю звідти всіх, у кого закінчився термін привілегії!**"
+        "Я твій особистий автономний бот-помічник.\n\n"
+        "📂 **Як оновити базу:** Просто надішли мені файл `vip_users.json` як документ у цей чат.\n"
+        "📋 **Як подивитися звіт:** Напиши команду `/info` (вона також працює для всіх гравців)."
     )
-    bot.send_message(message.chat.id, instructions, parse_mode="Markdown")
+    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
-# Обробник повідомлень з даними (тільки від вас)
-@bot.message_handler(func=lambda message: message.from_user.id == ALLOWED_ADMIN_ID and message.text)
-def handle_player_data(message):
+# Обробник отримання файлу JSON (ТІЛЬКИ ВІД ВАС)
+@bot.message_handler(content_types=['document'], func=lambda message: message.from_user.id == ALLOWED_ADMIN_ID)
+def handle_document(message):
+    if not message.document.file_name.endswith('.json'):
+        bot.send_message(message.chat.id, "❌ Помилка! Надішліть саме файл у форматі `.json`")
+        return
+
+    waiting = bot.send_message(message.chat.id, "📥 Завантажую та обробляю файл...")
+    
     try:
-        parts = [p.strip() for p in message.text.split(",")]
+        # Скачуємо файл із серверів Telegram
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
         
-        if len(parts) != 4:
-            bot.send_message(message.chat.id, "❌ **Помилка формата!**\nНадішліть рівно 4 параметри через кому:\n`Нік, SteamID, Привілегія, Дні`")
-            return
-
-        nick, steam_id, priv, days_str = parts
-        days = int(days_str)
-
-        expire_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-
-        new_player_obj = {
-            "nickname": nick,
-            "steam_id": steam_id,
-            "privilege": priv,
-            "expire_date": expire_date
-        }
-
-        waiting_msg = bot.send_message(message.chat.id, "⏳ Оновлюю файл vip_users.json на GitHub...")
-
-        success, details = update_json_on_github(new_player_obj)
-
-        if success:
-            response = (
-                f"✅ **Успішно додано в vip_users.json!**\n"
-                f"👤 Нік: `{nick}`\n"
-                f"📅 Дійсно до: *{expire_date}*\n\n"
-                f"🧹 Авточистка: вилучено *{details}* гравців, у яких закінчився термін."
-            )
-            bot.edit_message_text(response, message.chat.id, waiting_msg.message_id, parse_mode="Markdown")
-        else:
-            error_response = (
-                f"❌ **Не вдалося зберегти зміни.**\n\n"
-                f"⚙️ **Технічні деталі помилки:**\n```text\n{details}\n```"
-            )
-            bot.edit_message_text(error_response, message.chat.id, waiting_msg.message_id, parse_mode="Markdown")
-
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ **Помилка!** Кількість днів має бути цілим числом.")
+        # Зберігаємо файл локально в пам'ять бота
+        with open(FILE_PATH, 'wb') as new_file:
+            new_file.write(downloaded_file)
+            
+        # Запускаємо чистку протермінованих гравців
+        valid_list, removed = process_and_clean_database()
+        
+        response = (
+            f"✅ **Файл успішно збережено та активовано!**\n\n"
+            f"📊 Загалом активних гравців: `{len(valid_list)}`\n"
+            f"🧹 Авточистка: видалено `{removed}` застарілих привілегій, у яких вийшов термін."
+        )
+        bot.edit_message_text(response, message.chat.id, waiting.message_id, parse_mode="Markdown")
+        
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Виникла помилка: {e}")
+        bot.edit_message_text(f"❌ Помилка під час обробки файлу:\n`{str(e)}`", message.chat.id, waiting.message_id, parse_mode="Markdown")
+
+# Обробник команди /info (ВІДКРИТА ДЛЯ ВСІХ ГРАВЦІВ)
+@bot.message_handler(commands=['info'])
+def info_cmd(message):
+    current_thread_id = message.message_thread_id  # Підтримка гілок у супергрупах
+    
+    # Перед виведенням робимо швидку перевірку дат
+    players, _ = process_and_clean_database()
+    
+    if not players:
+        bot.send_message(message.chat.id, "📭 База даних порожня або файл ще не завантажено адміном.", message_thread_id=current_thread_id)
+        return
+
+    report = "📋 **Актуальний список привілегій на сервері:**\n\n"
+    
+    for idx, p in enumerate(players, 1):
+        nick = p.get("nickname", "Unknown")
+        steam = p.get("steam_id", "—")
+        priv = p.get("privilege", "VIP")
+        days = p.get("days_left", 0)
+        
+        # Красиве відображення залишку днів
+        if days == 0:
+            days_text = "останній день"
+        elif days < 0:
+            days_text = "термін вийшов"
+        else:
+            days_text = f"залишилось днів: {days}"
+
+        report += f"{idx}. 👤 *{nick}* | `{steam}`\n   👑 [{priv}] —  ⏱️ _{days_text}_\n\n"
+
+    # Якщо текст задовгий для одного повідомлення Telegram (більше 4000 символів), розіб'ємо його на частини
+    if len(report) > 4000:
+        for x in range(0, len(report), 4000):
+            bot.send_message(message.chat.id, report[x:x+4000], parse_mode="Markdown", message_thread_id=current_thread_id)
+    else:
+        bot.send_message(message.chat.id, report, parse_mode="Markdown", message_thread_id=current_thread_id)
 
 # === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
     def do_HEAD(self): self.send_response(200); self.end_headers()
     def do_POST(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
     def log_message(self, format, *args): return
 
-def run_health_server():
-    server = HTTPServer(("0.0.0.0", int(os.getenv("PORT", 10000))), HealthCheckHandler)
-    server.serve_forever()
-
 if __name__ == "__main__":
-    threading.Thread(target=run_health_server, daemon=True).start()
-    print("Розумний JSON адмін-бот успішно запущено!")
+    threading.Thread(target=lambda: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 10000))), HealthCheckHandler).serve_forever(), daemon=True).start()
+    print("Автономний адмін-блокнот успішно запущено!")
     bot.remove_webhook()
     bot.polling(none_stop=True, interval=2, timeout=15)
     
