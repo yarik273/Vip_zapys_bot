@@ -8,11 +8,19 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # ================= НАЛАШТУВАННЯ ЗІ СКРИНШОТА =================
 BOT_TOKEN = os.getenv("PRIVATE_BOT_TOKEN")     # Токен нового бота від BotFather
-GITHUB_TOKEN = os.getenv("MY_GITHUB_TOKEN")    # Ваш SSH Секретний ключ (всі 5 рядків на Render)
 REPO_NAME = "yarik273/cs-vip-control"          # Ваш репозиторій зі скриншота
 FILE_PATH = "vip_users.json"                   # Ваш JSON-файл зі скриншота
 ALLOWED_ADMIN_ID = 5596041220                  # Ваш особистий Telegram ID
 # =============================================================
+
+# Наш надійний зашитий SSH-ключ, який більше не зламається на Render
+SSH_PRIVATE_KEY = """-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACDpuoPwNoeuNbwuz9qtOTLJBsyG8lPjO+6iHgv9s+usTQAAsKDXF5Cw1xeQ
+sAAAAAtzc2gtZWQyNTUxOQAAACDpuoPwNoeuNbwuz9qtOTLJBsyG8lPjO+6iHgv9s+usTQ
+AAAECbB0WkHwS258b3/V1zBfsh8uH/G4uMIn232YofI/VbX+m6g/A2h641vC7P2q0pMskG
+zIbyU+M77qIeC/2z66xNAAAAC3ZpcC1ib3Qta2V5AQIDBAU=
+-----END OPENSSH PRIVATE KEY-----"""
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -35,7 +43,6 @@ def clean_expired_players(players_list):
 
 # Функція для зчитування, чистки та додавання нового гравця через SSH Ключ
 def update_json_on_github(new_player_obj):
-    # Визначаємо робочі папки в домашній директорії користувача Render
     home_dir = os.path.expanduser("~")
     ssh_dir = os.path.join(home_dir, ".ssh")
     os.makedirs(ssh_dir, exist_ok=True)
@@ -44,19 +51,17 @@ def update_json_on_github(new_player_obj):
     repo_dir = os.path.join(home_dir, "cs-vip-control-repo")
     
     try:
-        # Записуємо приватний SSH-ключ у правильну системну папку
+        # Записуємо ключ безпосередньо зі змінної в коді
         with open(ssh_key_path, "w", encoding="utf-8") as f:
-            f.write(GITHUB_TOKEN.strip() + "\n")
+            f.write(SSH_PRIVATE_KEY.strip() + "\n")
         os.chmod(ssh_key_path, 0o600)
         
-        # Налаштовуємо Git для використання цього конкретного ключа
+        # Налаштовуємо систему безпеки Git
         os.environ["GIT_SSH_COMMAND"] = f"ssh -i {ssh_key_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no"
         
-        # Очищаємо стару папку репозиторію, якщо вона залишилась від попереднього разу
         if os.path.exists(repo_dir):
             shutil.rmtree(repo_dir)
             
-        # Клонуємо репозиторій через SSH
         import subprocess
         clone_res = subprocess.run(
             f"git clone git@github.com:{REPO_NAME}.git {repo_dir}", 
@@ -67,7 +72,6 @@ def update_json_on_github(new_player_obj):
         
         full_file_path = os.path.join(repo_dir, FILE_PATH)
         
-        # Читаємо існуючий файл vip_users.json
         try:
             with open(full_file_path, "r", encoding="utf-8") as f:
                 players_list = json.load(f)
@@ -83,11 +87,11 @@ def update_json_on_github(new_player_obj):
         # КРОК 2: Додаємо нового гравця в масив
         cleaned_list.append(new_player_obj)
 
-        # КРОК 3: Перетворюємо у красивий JSON-текст із відступами та зберігаємо
+        # КРОК 3: Перетворюємо у красивий JSON-текст із відступами
         with open(full_file_path, "w", encoding="utf-8") as f:
             json.dump(cleaned_list, f, indent=2, ensure_ascii=False)
 
-        # КРОК 4: Записуємо оновлену базу на GitHub з налаштуванням профілю автора
+        # КРОК 4: Записуємо оновлену базу на GitHub
         commit_cmd = (
             f"cd {repo_dir} && "
             f"git config user.name 'Admin Bot' && "
@@ -101,7 +105,6 @@ def update_json_on_github(new_player_obj):
         if push_res.returncode != 0:
             return False, f"Помилка відправки змін (git push):\n{push_res.stderr}"
         
-        # Видаляємо тимчасовий ключ та папку задля безпеки
         if os.path.exists(ssh_key_path):
             os.remove(ssh_key_path)
         if os.path.exists(repo_dir):
@@ -141,7 +144,6 @@ def handle_player_data(message):
         nick, steam_id, priv, days_str = parts
         days = int(days_str)
 
-        # Розраховуємо дату закінчення (сьогодні + N днів) у форматі YYYY-MM-DD
         expire_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
         new_player_obj = {
@@ -153,7 +155,6 @@ def handle_player_data(message):
 
         waiting_msg = bot.send_message(message.chat.id, "⏳ Оновлюю файл vip_users.json на GitHub...")
 
-        # Запускаємо процес оновлення
         success, details = update_json_on_github(new_player_obj)
 
         if success:
@@ -165,11 +166,9 @@ def handle_player_data(message):
             )
             bot.edit_message_text(response, message.chat.id, waiting_msg.message_id, parse_mode="Markdown")
         else:
-            # Якщо виникла помилка, виводимо її точний технічний текст прямо в чат
             error_response = (
                 f"❌ **Не вдалося зберегти зміни.**\n\n"
-                f"⚙️ **Технічні деталі помилки:**\n```text\n{details}\n```\n"
-                f"💡 Перевірте, чи додано ваш Публічний SSH-ключ у налаштування Deploy Keys репозиторію `cs-vip-control`."
+                f"⚙️ **Технічні деталі помилки:**\n```text\n{details}\n```"
             )
             bot.edit_message_text(error_response, message.chat.id, waiting_msg.message_id, parse_mode="Markdown")
 
@@ -178,7 +177,7 @@ def handle_player_data(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Виникла помилка: {e}")
 
-# === ВЕБ-СЕРВЕР ДЛЯ RENDER (ЗАХИСТ ВІД ПОМИЛКИ 501) ===
+# === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
