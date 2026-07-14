@@ -53,7 +53,7 @@ def send_top_players(message):
             players = json.load(f)
         
         # Автоматично сортуємо гравців за вбивствами (kills) від більшого до меншого
-        players.sort(key=lambda x: x.get('kills', 0), reverse=True)
+    # players.sort(key=lambda x: x.get('kills', 0), reverse=True)
 
         lines = []
         # Формуємо список топ-10
