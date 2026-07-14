@@ -11,7 +11,7 @@ BOT_TOKEN = os.getenv("PRIVATE_BOT_TOKEN")     # Токен нового бот�
 GITHUB_TOKEN = os.getenv("MY_GITHUB_TOKEN")    # Ваш SSH Секретний ключ (всі 5 рядків на Render)
 REPO_NAME = "yarik273/cs-vip-control"          # Ваш репозиторій зі скриншота
 FILE_PATH = "vip_users.json"                   # Ваш JSON-файл зі скриншота
-ALLOWED_ADMIN_ID = 559664326                   # Ваш особистий Telegram ID зі скриншота
+ALLOWED_ADMIN_ID =  5596041220             # Ваш особистий Telegram ID зі скриншота
 # =============================================================
 
 bot = telebot.TeleBot(BOT_TOKEN)
