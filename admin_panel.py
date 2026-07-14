@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # ================= НАЛАШТУВАННЯ ЗІ СКРИНШОТА =================
 BOT_TOKEN = os.getenv("PRIVATE_BOT_TOKEN")     # Токен нового бота від BotFather
-GITHUB_TOKEN = os.getenv("MY_GITHUB_TOKEN")    # Ваш токен GitHub (з правами repo)
+GITHUB_TOKEN = os.getenv("PRIVATE_BOT_TOKEN")  # Ваш токен GitHub (з правами repo)
 REPO_NAME = "yarik273/cs-vip-control"          # Ваш репозиторій зі скриншота
 FILE_PATH = "vip_users.json"                   # Ваш JSON-файл зі скриншота
 ALLOWED_ADMIN_ID = 5596041220                 # СУВОРО ВКАЖІТЬ ВАШ TELEGRAM ID
