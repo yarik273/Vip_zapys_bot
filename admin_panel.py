@@ -1,6 +1,5 @@
 import os
 import json
-from datetime import datetime
 import telebot
 import threading
 import http.server
@@ -16,25 +15,23 @@ def run_fake_server():
 
 threading.Thread(target=run_fake_server, daemon=True).start()
 
-# 2. Ініціалізація бота та конфігурація прив'язки
-# Використовуємо саме PRIVATE_BOT_TOKEN, як налаштовано у вас на Render
-BOT_TOKEN = os.environ.get('PRIVATE_BOT_TOKEN')
+# 2. Ініціалізація бота
+BOT_TOKEN = os.environ.get('TOP_BOT_TOKEN')
 if not BOT_TOKEN:
-    raise ValueError("Токен PRIVATE_BOT_TOKEN не знайдено в змінних оточення!")
+    raise ValueError("Токен TOP_BOT_TOKEN не знайдено в змінних оточення!")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# НАЛАШТУВАННЯ ПРИВ'ЯЗКИ
+# НАЛАШТУВАННЯ ДОРУЧЕНЬ ТА ПРИВ'ЯЗКИ (Точно як у попередньому боті)
 ALLOWED_CHAT_USERNAME = "volynskiy_public"  # Юзернейм вашої групи
 ALLOWED_THREAD_ID = 738                      # ID дозволеної гілки
 MY_PERSONAL_ID = 5596041220                  # Ваш особистим Telegram ID
 
-# 3. Обробка команди статусу VIP
-@bot.message_handler(commands=['status'])
-
-def send_vip_status(message):
+# 3. Обробка команди /top або /top10
+@bot.message_handler(commands=['top', 'top10'])
+def send_top_players(message):
     try:
-        # ПЕРЕВІРКА ДОСТУПУ: Дозволяємо ЛС з вами АБО конкретну гілку у групі
+        # СУВОРА ПЕРЕВІРКА ДОСТУПУ: Дозволяємо ЛС з вами АБО конкретну гілку у групі
         is_my_private_chat = (message.chat.type == 'private' and message.chat.id == MY_PERSONAL_ID)
         is_allowed_group_thread = (
             message.chat.username and 
@@ -42,63 +39,62 @@ def send_vip_status(message):
             message.message_thread_id == ALLOWED_THREAD_ID
         )
 
-        # Якщо це не ваш особистий чат і не дозволена гілка — повністю ігноруємо
+        # Якщо це не ваше ЛС і не дозволена гілка — бот повністю ігнорує команду і мовчить
         if not (is_my_private_chat or is_allowed_group_thread):
             return  
 
-        # Далі ваш оригінальний код без змін...
-        if not os.path.exists('vip_users.json'):
-            bot.reply_to(message, "❌ Помилка: Файл `vip_users.json` не знайдено!")
+        # Перевірка наявності файлу з топом
+        if not os.path.exists('top_players.json'):
+            bot.reply_to(message, "❌ Помилка: Файл `top_players.json` не знайдено!")
             return
 
-        with open('vip_users.json', 'r', encoding='utf-8') as f:
-            users = json.load(f)
+        # Зчитуємо актуальні дані з файлу
+        with open('top_players.json', 'r', encoding='utf-8') as f:
+            players = json.load(f)
         
-        today = datetime.now().date()
+        # Автоматично сортуємо гравців за вбивствами (kills) від більшого до меншого
+        players.sort(key=lambda x: x.get('kills', 0), reverse=True)
+
         lines = []
-        
-        for user in users:
-            expire_date = datetime.strptime(user['expire_date'], "%Y-%m-%d").date()
-            days_left = (expire_date - today).days
-            formatted_date = expire_date.strftime("%d.%m.%Y")
-            
-            if days_left > 5:
-                status = f"⏳ Дійсна до: {formatted_date} (залишилось {days_left} дн.)"
-            elif 0 < days_left <= 5:
-                status = f"⚠️ Дійсна до: {formatted_date} (залишилось всього {days_left} дн.!)"
-            elif days_left == 0:
-                status = f"🚨 ЗАКІНЧУЄТЬСЯ СЬОГОДНІ ({formatted_date})!"
+        # Формуємо список топ-10
+        for index, player in enumerate(players[:10], start=1):
+            if index == 1:
+                medal = "🥇"
+            elif index == 2:
+                medal = "🥈"
+            elif index == 3:
+                medal = "🥉"
             else:
-                status = f"❌ ТЕРМІН ЗАКІНЧИВСЯ ({formatted_date})!"
-            
-            player_info = (
-                f"👤 Нік: {user['nickname']}\n"
-                f"🆔 Steam: {user['steam_id']}\n"
-                f"👑 Привілея: {user['privilege']}\n"
-                f"{status}\n"
-                f"────────────────"
-            )
-            lines.append(player_info)
+                medal = f"*{index}.*"
+
+            nickname = player.get('nickname', 'Unknown Player')
+            kills = player.get('kills', 0)
+            deaths = player.get('deaths', 0)
+            hs = player.get('headshots', 0)
+
+            # Гарний рядок для кожного гравця
+            player_line = f"{medal} {nickname} — `{kills}` уб. _(💀 {deaths} / 🪖 {hs} в голову)_"
+            lines.append(player_line)
         
         if lines:
             response = (
-                "📊 *СТАТУС VIP ПРИВІЛЕЙ:*\n\n" + 
+                "🏆 *ТОП-10 НАЙКРАЩИХ ГРАВЦІВ СЕРВЕРА:*\n\n" + 
                 "\n".join(lines) + 
-                "\n\n👉 Для купівлі або продовження привілей зв'яжіться з адміністрацією. @Marvel_Volynskiy_Public"
+                "\n\n📊 Оновлення статистики відбувається автоматично."
             )
         else:
-            response = "Список привілей порожній."
+            response = "Список найкращих гравців порожній."
             
-        safe_response = response.replace("_", "\\_")
+        # Надійний захист від зламу Markdown через символи <, > або _ у нікнеймах гравців
+        safe_response = response.replace("_", "\\_").replace("<", "\\<").replace(">", "\\>")
         bot.reply_to(message, safe_response, parse_mode='Markdown')
         
     except json.JSONDecodeError:
-        bot.reply_to(message, "❌ Помилка: Неправильний формат тексту у файлі `vip_users.json`!")
+        bot.reply_to(message, "❌ Помилка: Неправильний формат тексту у файлі `top_players.json`!")
     except Exception as e:
         bot.reply_to(message, f"❌ Системна помилка: {str(e)}")
 
-# 4. Головний цикл запуску
 if __name__ == "__main__":
-    print("Бот контролю VIP запущений...")
+    print("Бот ТОП-10 успішно запущений...")
     bot.infinity_polling()
     
