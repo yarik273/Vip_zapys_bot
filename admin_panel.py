@@ -24,7 +24,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 # НАЛАШТУВАННЯ ДОРУЧЕНЬ ТА ПРИВ'ЯЗКИ (Точно як у попередньому боті)
 ALLOWED_CHAT_USERNAME = "volynskiy_public"  # Юзернейм вашої групи
-ALLOWED_THREAD_ID = 738                      # ID дозволеної гілки
+ALLOWED_THREAD_ID = 764                     # ID дозволеної гілки
 MY_PERSONAL_ID = 5596041220                  # Ваш особистим Telegram ID
 
 # 3. Обробка команди /top або /top10
