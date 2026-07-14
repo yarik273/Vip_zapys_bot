@@ -6,7 +6,7 @@ import threading
 import http.server
 import socketserver
 
-# 1. Фейковый веб-сервер для обхода проверки портов на Render
+# 1. Фейковий веб-сервер для обходу перевірки портів на Render
 def run_fake_server():
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
@@ -16,31 +16,36 @@ def run_fake_server():
 
 threading.Thread(target=run_fake_server, daemon=True).start()
 
-# 2. Инициализация бота и конфигурация привязки
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
+# 2. Ініціалізація бота та конфігурація прив'язки
+# Використовуємо саме PRIVATE_BOT_TOKEN, як налаштовано у вас на Render
+BOT_TOKEN = os.environ.get('PRIVATE_BOT_TOKEN')
 if not BOT_TOKEN:
-    raise ValueError("Токен BOT_TOKEN не знайдено в змінних оточення!")
+    raise ValueError("Токен PRIVATE_BOT_TOKEN не знайдено в змінних оточення!")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# НАСТРОЙКА ПРИВЯЗКИ К КОНКРЕТНОЙ ВЕТКЕ И ГРУППЕ
-ALLOWED_CHAT_USERNAME = "volynskiy_public"  # Юзернейм вашей группы из ссылки
-ALLOWED_THREAD_ID = 738                      # ID ветки из ссылки
+# НАЛАШТУВАННЯ ПРИВ'ЯЗКИ
+ALLOWED_CHAT_USERNAME = "volynskiy_public"  # Юзернейм вашої групи
+ALLOWED_THREAD_ID = 738                      # ID дозволеної гілки
+MY_PERSONAL_ID = 5596041220                  # Ваш особистим Telegram ID
 
-# 3. Обработка команды статуса VIP
+# 3. Обробка команди статусу VIP
 @bot.message_handler(commands=['vip', 'vip_status'])
 def send_vip_status(message):
     try:
-        # 1. Проверяем, что команда вызвана именно в вашей группе
-        # (переводим в нижний регистр для исключения ошибок с заглавными буквами)
-        if not message.chat.username or message.chat.username.lower() != ALLOWED_CHAT_USERNAME.lower():
-            return  # Полностью игнорируем запросы из других чатов или ЛС
+        # ПЕРЕВІРКА ДОСТУПУ: Дозволяємо ЛС з вами АБО конкретну гілку у групі
+        is_my_private_chat = (message.chat.type == 'private' and message.chat.id == MY_PERSONAL_ID)
+        is_allowed_group_thread = (
+            message.chat.username and 
+            message.chat.username.lower() == ALLOWED_CHAT_USERNAME.lower() and 
+            message.message_thread_id == ALLOWED_THREAD_ID
+        )
 
-        # 2. Проверяем, что команда отправлена именно в ветку 738
-        if message.message_thread_id != ALLOWED_THREAD_ID:
-            return  # Полностью игнорируем запросы из других веток этой группы
+        # Якщо це не ваш особистий чат і не дозволена гілка — повністю ігноруємо
+        if not (is_my_private_chat or is_allowed_group_thread):
+            return  
 
-        # Дальше ваш оригинальный код без изменений
+        # Далі ваш оригінальний код без змін...
         if not os.path.exists('vip_users.json'):
             bot.reply_to(message, "❌ Помилка: Файл `vip_users.json` не знайдено!")
             return
@@ -83,7 +88,6 @@ def send_vip_status(message):
         else:
             response = "Список привілей порожній."
             
-        # Защита от падения из-за спецсимволов (_) в Steam ID и никнеймах
         safe_response = response.replace("_", "\\_")
         bot.reply_to(message, safe_response, parse_mode='Markdown')
         
@@ -92,7 +96,7 @@ def send_vip_status(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Системна помилка: {str(e)}")
 
-# 4. Главный цикл запуска
+# 4. Головний цикл запуску
 if __name__ == "__main__":
     print("Бот контролю VIP запущений...")
     bot.infinity_polling()
